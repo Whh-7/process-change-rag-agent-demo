@@ -94,6 +94,51 @@ streamlit run app.py
 - 复核建议报告
 - RAG 检索测试
 
+## 运行 RAG 评估
+
+RAG 评估用于检查 `search_docs()` 的检索命中效果。当前只评估 retrieval，不评估大模型生成。
+
+先确保知识库已经构建：
+
+```bash
+python scripts/build_knowledge_base.py
+```
+
+然后运行：
+
+```bash
+python scripts/run_rag_evaluation.py
+```
+
+如果使用 `.venv`：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_rag_evaluation.py
+```
+
+评估集：
+
+```text
+eval/rag_eval_set.csv
+```
+
+输出：
+
+```text
+outputs/eval/rag_eval_results.csv
+outputs/eval/rag_eval_summary.md
+outputs/eval/rag_eval_failed_cases.csv
+```
+
+主要指标：
+
+- source_file hit rate：是否命中期望来源文件。
+- source_type hit rate：是否命中期望来源类型。
+- keyword hit rate：检索文本是否包含期望关键词。
+- evidence_strength hit rate：证据强度是否符合预期。
+- MRR：首次命中的倒数排名。
+- overall_pass：综合通过率。
+
 ## 常见问题
 
 ### 页面提示缺少 change_report.csv

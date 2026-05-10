@@ -121,6 +121,40 @@ streamlit run app.py
 - 生成一份本次流程配置变更复核建议报告。
 - 新增任务节点需要校验哪些字段？
 
+## RAG 评估
+
+本项目新增轻量 RAG 评估集和评估脚本，用于检查当前知识库的检索效果。评估对象是 retrieval，不评估 LLM 生成质量，也不使用大模型做 judge。
+
+评估集位于：
+
+```text
+eval/rag_eval_set.csv
+```
+
+评估指标包括：
+
+- `hit@k_by_source_file`：top-k 是否命中期望来源文件。
+- `hit@k_by_source_type`：top-k 是否命中期望来源类型。
+- `keyword_hit@k`：top-k 文本是否包含期望关键词。
+- `evidence_strength_hit@k`：top-k 是否命中期望证据强度。
+- `MRR`：按 source_file 或 source_type 首次命中的 rank 计算 reciprocal rank。
+- `overall_pass`：命中 source_file，或同时命中 source_type 和关键词，即视为通过。
+
+运行评估前请先构建知识库：
+
+```bash
+python scripts/build_knowledge_base.py
+python scripts/run_rag_evaluation.py
+```
+
+输出文件：
+
+```text
+outputs/eval/rag_eval_results.csv
+outputs/eval/rag_eval_summary.md
+outputs/eval/rag_eval_failed_cases.csv
+```
+
 ## 当前版本能力
 
 当前版本为 `v0.1`：
@@ -129,8 +163,9 @@ streamlit run app.py
 - 已完成 RAG 检索。
 - 已完成证据匹配。
 - 已完成页面展示。
+- 已完成轻量 RAG 检索评估。
 - 暂未接入大模型 API。
-- 暂未做完整 RAG 评估集。
+- 暂未做大规模人工标注评估集。
 
 ## 后续计划
 
