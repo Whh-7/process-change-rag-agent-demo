@@ -1,0 +1,29 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Environment and local secrets
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Runtime cache and generated large files
+outputs/*
+!outputs/.gitkeep
+outputs/chroma_db/
+outputs/**/*.sqlite
+outputs/**/*.sqlite3
+outputs/**/*.parquet
+*.log
