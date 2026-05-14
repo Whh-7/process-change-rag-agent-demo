@@ -121,6 +121,70 @@ streamlit run app.py
 - 生成一份本次流程配置变更复核建议报告。
 - 新增任务节点需要校验哪些字段？
 
+## RAG 评估
+
+本项目新增轻量 RAG 评估集和评估脚本，用于检查当前知识库的检索效果。评估对象是 retrieval，不评估 LLM 生成质量，也不使用大模型做 judge。
+
+评估集位于：
+
+```text
+eval/rag_eval_set.csv
+```
+
+评估指标包括：
+
+- `hit@k_by_source_file`：top-k 是否命中期望来源文件。
+- `hit@k_by_source_type`：top-k 是否命中期望来源类型。
+- `keyword_hit@k`：top-k 文本是否包含期望关键词。
+- `evidence_strength_hit@k`：top-k 是否命中期望证据强度。
+- `MRR`：按 source_file 或 source_type 首次命中的 rank 计算 reciprocal rank。
+- `overall_pass`：命中 source_file，或同时命中 source_type 和关键词，即视为通过。
+
+运行评估前请先构建知识库：
+
+```bash
+python scripts/build_knowledge_base.py
+python scripts/run_rag_evaluation.py
+```
+
+输出文件：
+
+```text
+outputs/eval/rag_eval_results.csv
+outputs/eval/rag_eval_summary.md
+outputs/eval/rag_eval_failed_cases.csv
+```
+
+## 大模型 API 可选接入
+
+当前项目默认不需要 API key。未配置 `.env`、`LLM_ENABLE=false` 或未检测到有效 `LLM_API_KEY` 时，系统会自动使用规则模板回答，原有差异分析、RAG 检索、证据匹配和 Streamlit 页面都可以正常运行。
+
+如需启用 DeepSeek 官方 OpenAI-compatible API：
+
+1. 复制示例配置：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+2. 编辑 `.env`，填写自己的 `LLM_API_KEY`，并设置：
+
+```text
+LLM_ENABLE=true
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+```
+
+3. 重新运行 Agent 或 Streamlit 页面。
+
+注意：
+
+- 不要提交 `.env`，仓库只提交 `.env.example`。
+- 不要把 API key 写进代码、README 或截图。
+- LLM 只用于回答生成和报告润色，不负责差异分析、证据匹配、证据强弱判断或复核优先级判断。
+- 如果要切换到 Qwen/OpenAI 或其他 OpenAI-compatible 模型，只需要修改 `LLM_BASE_URL` 和 `LLM_MODEL`。
+- 当前 demo 使用的都是虚构模拟数据，不包含真实公司、真实客户或真实人员信息。
+
 ## 当前版本能力
 
 当前版本为 `v0.1`：
@@ -129,8 +193,9 @@ streamlit run app.py
 - 已完成 RAG 检索。
 - 已完成证据匹配。
 - 已完成页面展示。
-- 暂未接入大模型 API。
-- 暂未做完整 RAG 评估集。
+- 已完成轻量 RAG 检索评估。
+- 已支持可选 OpenAI-compatible 大模型 API 作为表达层增强，默认关闭。
+- 暂未做大规模人工标注评估集。
 
 ## 后续计划
 

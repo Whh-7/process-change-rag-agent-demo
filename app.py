@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Streamlit 页面：流程配置变更 RAG + Agent 助手 Demo。
 
-页面只负责展示和调度已有模块，不改动 data 数据，也不引入大模型调用。
+页面只负责展示和调度已有模块，不改动 data 数据；如启用 LLM，也只用于回答表达和报告润色。
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from agent_router import AgentRouter  # noqa: E402
+from llm_client import get_llm_config  # noqa: E402
 from rag_engine import reset_rag_cache, search_docs  # noqa: E402
 
 
@@ -213,6 +214,8 @@ def add_phase_task_columns(df: pd.DataFrame) -> pd.DataFrame:
 def show_status_tab() -> None:
     """Tab1：展示关键文件和模块状态，并提供脚本运行按钮。"""
     st.header("系统状态")
+    with st.expander("LLM 可选生成层状态", expanded=True):
+        show_llm_status()
     rows = []
     for item in STATUS_CHECKS:
         path = ROOT_DIR / item["path"]
@@ -278,6 +281,19 @@ def show_sources_table(sources: list[dict[str, Any]]) -> None:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+def show_llm_status() -> None:
+    """展示 LLM 配置状态，不显示 API key。"""
+    config = get_llm_config()
+    rows = [
+        {"配置项": "LLM_ENABLE", "值": str(config.get("enable", False))},
+        {"配置项": "LLM_PROVIDER", "值": str(config.get("provider", ""))},
+        {"配置项": "LLM_BASE_URL", "值": str(config.get("base_url", ""))},
+        {"配置项": "LLM_MODEL", "值": str(config.get("model", ""))},
+        {"配置项": "是否检测到 API key", "值": "是" if config.get("has_api_key") else "否"},
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
 def show_agent_tab() -> None:
     """Tab2：调用轻量 Agent Router 做规则化问答。"""
     st.header("Agent 问答")
@@ -314,6 +330,12 @@ def show_agent_tab() -> None:
         st.code(str(result.get("intent", "")))
         st.markdown("**tools_used**")
         st.code(", ".join(result.get("tools_used", [])))
+        st.markdown("**llm_used**")
+        st.code(str(result.get("llm_used", False)))
+        fallback_reason = result.get("fallback_reason", "")
+        if fallback_reason:
+            st.markdown("**fallback_reason**")
+            st.info(str(fallback_reason))
         st.markdown("**answer**")
         st.markdown(str(result.get("answer", "")))
         st.markdown("**sources**")
@@ -474,6 +496,17 @@ def show_focus_table(df: pd.DataFrame, title: str, subset: pd.DataFrame) -> None
 def show_review_report_tab() -> None:
     """Tab5：展示 evidence_summary.md 和页面级复核摘要。"""
     st.header("复核建议报告")
+    if st.button("使用 Agent Router 生成复核报告", key="review_tab_agent_report"):
+        with st.spinner("正在生成复核报告..."):
+            result = AgentRouter(ROOT_DIR).route("生成一份本次流程配置变更复核建议报告")
+        st.markdown("**llm_used**")
+        st.code(str(result.get("llm_used", False)))
+        fallback_reason = result.get("fallback_reason", "")
+        if fallback_reason:
+            st.markdown("**fallback_reason**")
+            st.info(str(fallback_reason))
+        st.markdown(str(result.get("answer", "")))
+        st.divider()
     summary_path = ROOT_DIR / "outputs/evidence_summary.md"
     evidence_path = ROOT_DIR / "outputs/change_report_with_evidence.csv"
 
@@ -574,6 +607,8 @@ def main() -> None:
     st.set_page_config(page_title="流程配置变更 RAG + Agent 助手 Demo", layout="wide")
     st.title("流程配置变更 RAG + Agent 助手 Demo")
     st.write("本系统模拟车企项目开发流程配置变更场景，支持多来源资料建库、新旧配置差异分析、变更依据匹配和复核建议生成。")
+    with st.expander("LLM 可选生成层状态", expanded=False):
+        show_llm_status()
 
     tabs = st.tabs(["系统状态", "Agent 问答", "变更清单", "证据匹配", "复核建议报告", "RAG 检索测试"])
     with tabs[0]:

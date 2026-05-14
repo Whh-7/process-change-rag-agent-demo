@@ -1,0 +1,36 @@
+case_id,query,query_type,expected_source_files,expected_source_types,expected_keywords,expected_evidence_strength,note
+EVAL-001,聊天记录能不能作为正式变更依据？,chat_policy,07_process_rule_manual.md;06_chat_change_messages.md,rule_manual;chat_message,聊天记录;弱依据;人工复核,any,覆盖聊天记录依据强弱判断
+EVAL-002,口头通知可以作为正式依据吗？,chat_policy,07_process_rule_manual.md;06_chat_change_messages.md,rule_manual;chat_message,口头通知;弱线索;不能,any,覆盖口头通知规则
+EVAL-003,新增任务节点需要校验哪些字段？,review_rule,07_process_rule_manual.md,rule_manual,新增节点;责任部门;负责人;交付文档,strong,覆盖新增节点复核规则
+EVAL-004,负责人变更需要核对什么材料？,review_rule,07_process_rule_manual.md;04_appointment_adjustment_notice.md,rule_manual;appointment_notice,负责人变更;任命调整通知;会议纪要,strong,覆盖负责人变更规则
+EVAL-005,交付文档变更需要核对哪些来源？,review_rule,07_process_rule_manual.md;05_process_change_meeting_minutes.md,rule_manual;meeting_minutes,交付文档;会议纪要;部门更新,strong,覆盖文档变更规则
+EVAL-006,旧配置表和新版配置表能不能证明变更原因？,rule_qa,07_process_rule_manual.md;01_system_export_current_config.csv;03_target_config_v2.csv,rule_manual;old_config;target_config,配置上下文;变更原因;不能,any,覆盖配置上下文和规则解释
+EVAL-007,部门在线更新表属于什么依据？,rule_qa,07_process_rule_manual.md;02_department_update_feishu.csv,rule_manual;department_update,部门在线更新表;中等依据;会议纪要,any,覆盖中等依据来源
+EVAL-008,强变更依据包括哪些来源？,rule_qa,07_process_rule_manual.md;04_appointment_adjustment_notice.md;05_process_change_meeting_minutes.md,rule_manual;appointment_notice;meeting_minutes,任命调整通知;会议纪要;强依据,strong,覆盖强依据分类
+EVAL-009,电控 立项阶段 客户需求分析 负责人 任命调整依据,change_evidence,04_appointment_adjustment_notice.md;02_department_update_feishu.csv,appointment_notice;department_update,客户需求分析;陆知衡;APPT-001,strong,覆盖负责人调整 APPT-001
+EVAL-010,电机 策划阶段 电机控制策略评审 负责人 任命调整依据,change_evidence,04_appointment_adjustment_notice.md;02_department_update_feishu.csv,appointment_notice;department_update,电机控制策略评审;方澄远;APPT-002,strong,覆盖电机负责人调整
+EVAL-011,电控 策划阶段 软件需求冻结 负责人 任命调整依据,change_evidence,04_appointment_adjustment_notice.md;02_department_update_feishu.csv,appointment_notice;department_update,软件需求冻结;邵予白;APPT-003,strong,覆盖电控负责人调整
+EVAL-012,电源 策划阶段 电池包接口评审 负责人 任命调整依据,change_evidence,04_appointment_adjustment_notice.md;02_department_update_feishu.csv,appointment_notice;department_update,电池包接口评审;顾景初;APPT-004,strong,覆盖电源负责人调整
+EVAL-013,整机 策划阶段 整车集成评审 负责人 任命调整依据,change_evidence,04_appointment_adjustment_notice.md;02_department_update_feishu.csv,appointment_notice;department_update,整车集成评审;林越川;APPT-005,strong,覆盖整机负责人调整
+EVAL-014,热管理 B1样阶段 冷却系统验证 负责人 任命调整依据,change_evidence,04_appointment_adjustment_notice.md;02_department_update_feishu.csv,appointment_notice;department_update,冷却系统验证;夏南栀;APPT-006,strong,覆盖热管理负责人调整
+EVAL-015,车载软件 B2样阶段 车载软件版本冻结 负责人 任命调整依据,change_evidence,04_appointment_adjustment_notice.md;02_department_update_feishu.csv,appointment_notice;department_update,车载软件版本冻结;邵予白;APPT-007,strong,覆盖车载软件负责人调整
+EVAL-016,会议纪要 新增 功能安全影响分析 节点,change_evidence,05_process_change_meeting_minutes.md,meeting_minutes,功能安全影响分析;新增;MIN-001,strong,覆盖会议纪要新增节点
+EVAL-017,会议纪要 新增 高压互锁检查 节点,change_evidence,05_process_change_meeting_minutes.md;04_appointment_adjustment_notice.md,meeting_minutes;appointment_notice,高压互锁检查;新增;MIN-002,strong,覆盖电源新增节点
+EVAL-018,会议纪要 新增 诊断DTC一致性检查 节点,change_evidence,05_process_change_meeting_minutes.md;04_appointment_adjustment_notice.md,meeting_minutes;appointment_notice,诊断DTC一致性检查;新增;MIN-003,strong,覆盖电控新增节点
+EVAL-019,热管理 A样阶段 A样测试方案 交付文档 变更依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,A样DVP&R测试方案;MIN-004;交付文档,strong,覆盖文档名称变化
+EVAL-020,电机 策划阶段 DFMEA 交付文档 变更依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,DFMEA及特殊特性清单;MIN-005;交付物,strong,覆盖 DFMEA 交付物调整
+EVAL-021,传动系统 C样阶段 PPAP资料准备 交付文档 变更依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,PPAP提交包及检查清单;MIN-006,strong,覆盖 PPAP 文档调整
+EVAL-022,电机 B2样阶段 电机DV测试 交付文档 变更依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,电机DV测试;MIN-007;交付文档,strong,覆盖电机 DV 文档变化
+EVAL-023,电源 策划阶段 高压安全评审 审批角色调整依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,高压安全评审;审批角色;MIN-009,strong,覆盖审批角色调整
+EVAL-024,电控 C样阶段 电控EOL测试脚本确认 责任部门调整依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,电控EOL测试脚本确认;电控软件部;MIN-013,strong,覆盖责任部门调整
+EVAL-025,整机 B1样阶段 整车道路试验 时间规则调整依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,整车道路试验;7个工作日;MIN-015,strong,覆盖时间规则调整
+EVAL-026,SOP阶段有哪些复核要求？,review_rule,07_process_rule_manual.md;05_process_change_meeting_minutes.md,rule_manual;meeting_minutes,SOP;复核;GR7,strong,覆盖 SOP 复核规则
+EVAL-027,电机 立项阶段 项目立项申请 当前旧版配置负责人是谁？,config_lookup,01_system_export_current_config.csv,old_config,项目立项申请;周宁;V1.0,strong,覆盖旧配置上下文查询
+EVAL-028,电控 B2样阶段 B2样设计冻结评审 新版配置是什么？,config_lookup,03_target_config_v2.csv,target_config,B2样设计冻结评审;设计冻结评审包;V2.0,strong,覆盖新版配置上下文查询
+EVAL-029,电源 B2样阶段 B2样BOM冻结 部门更新表建议是什么？,change_evidence,02_department_update_feishu.csv,department_update,B2样BOM冻结;审批角色调整;MIN-010,medium,覆盖部门在线更新记录
+EVAL-030,聊天里关于 B1样人工复核 怎么说？,chat_policy,06_chat_change_messages.md,chat_message,B1样;人工复核;线索,weak,覆盖聊天弱线索检索
+EVAL-031,聊天记录里软件集成测试名称是否确定？,chat_policy,06_chat_change_messages.md,chat_message,软件集成测试;不确定;线索,weak,覆盖聊天不完整信息
+EVAL-032,会议纪要如何处理聊天记录与会议纪要不一致？,review_rule,05_process_change_meeting_minutes.md;07_process_rule_manual.md,meeting_minutes;rule_manual,聊天记录;会议纪要;人工复核,strong,覆盖冲突证据处理
+EVAL-033,车载软件 SOP阶段 配置基线归档 交付文档依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,车载软件配置基线归档;MIN-008;交付文档,strong,覆盖车载软件 SOP 文档变化
+EVAL-034,热管理 SOP阶段 量产成本闭环 时间规则调整依据,change_evidence,05_process_change_meeting_minutes.md;02_department_update_feishu.csv,meeting_minutes;department_update,量产成本闭环;SOP后15个工作日;MIN-014,strong,覆盖热管理 SOP 时间规则
+EVAL-035,只有配置上下文时应该如何复核？,review_rule,07_process_rule_manual.md,rule_manual,配置上下文;缺少变更依据;人工复核,strong,覆盖仅配置上下文复核规则

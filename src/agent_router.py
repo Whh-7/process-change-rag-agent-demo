@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from rag_engine import search_docs
+from llm_client import generate_rag_answer, generate_review_report_llm
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -24,14 +25,21 @@ class AgentRouter:
 
     def __init__(self, root_dir: str | Path | None = None) -> None:
         self.root_dir = Path(root_dir) if root_dir else ROOT_DIR
+        self.last_retrieved_docs: list[dict[str, Any]] = []
+        self.last_review_summary_stats: dict[str, Any] = {}
+        self.last_review_key_items: list[dict[str, Any]] = []
 
     def route(self, user_query: str) -> dict[str, Any]:
-        """判断 intent 并调用对应工具。"""
+        """?? intent ????????LLM ?????????"""
         query = user_query.strip()
         intent = self.detect_intent(query)
+        llm_used = False
+        fallback_reason = ""
         if intent == "rule_qa":
             result = self.answer_rule_question(query)
             result["intent"] = intent
+            result.setdefault("llm_used", False)
+            result.setdefault("fallback_reason", "")
             return result
         if intent == "status_check":
             answer, sources = self.check_project_status()
@@ -45,13 +53,25 @@ class AgentRouter:
         elif intent == "review_report":
             answer, sources = self.generate_review_report()
             tools = ["generate_review_report"]
+            llm_text, reason = generate_review_report_llm(self.last_review_summary_stats, self.last_review_key_items)
+            if llm_text:
+                answer = llm_text
+                llm_used = True
+            else:
+                fallback_reason = reason or ""
         elif intent == "rag_search":
             answer, sources = self.run_rag_search(query)
             tools = ["search_docs"]
+            llm_text, reason = generate_rag_answer(query, self.last_retrieved_docs)
+            if llm_text:
+                answer = llm_text
+                llm_used = True
+            else:
+                fallback_reason = reason or ""
         else:
             answer, sources = self.help_message(), []
             tools = []
-        return {"intent": intent, "tools_used": tools, "answer": answer, "sources": sources}
+        return {"intent": intent, "tools_used": tools, "answer": answer, "sources": sources, "llm_used": llm_used, "fallback_reason": fallback_reason}
 
     def detect_intent(self, query: str) -> str:
         """根据关键词判断用户意图，规则问答优先于普通检索。"""
@@ -171,7 +191,11 @@ class AgentRouter:
             "### 相关来源",
             answer,
         ]
-        return {"tools_used": ["rule_template", "search_docs"], "answer": "\n".join(lines), "sources": sources}
+        template_answer = "\n".join(lines)
+        llm_text, reason = generate_rag_answer(query, self.last_retrieved_docs)
+        if llm_text:
+            return {"tools_used": ["rule_template", "search_docs", "generate_rag_answer"], "answer": llm_text, "sources": sources, "llm_used": True, "fallback_reason": ""}
+        return {"tools_used": ["rule_template", "search_docs"], "answer": template_answer, "sources": sources, "llm_used": False, "fallback_reason": reason or ""}
 
     def count_lines(self, df: pd.DataFrame, column: str, title: str) -> list[str]:
         """生成字段分布统计文本。"""
@@ -291,6 +315,14 @@ class AgentRouter:
         priority_counts = df.get("review_priority", pd.Series(dtype=str)).replace("", "未填写").value_counts()
 
         focus = self.focus_review_rows(df)
+        self.last_review_summary_stats = {
+            "total_changes": total,
+            "change_type_counts": change_type_counts.to_dict(),
+            "impact_level_counts": impact_counts.to_dict(),
+            "evidence_status_counts": evidence_counts.to_dict(),
+            "review_priority_counts": priority_counts.to_dict(),
+        }
+        self.last_review_key_items = focus.head(12).fillna("").to_dict(orient="records")
         lines = [
             "## 流程配置变更复核建议报告",
             "",
@@ -378,7 +410,9 @@ class AgentRouter:
         """调用 RAG 检索并格式化结果。"""
         try:
             results = search_docs(user_query, top_k=5, persist_dir=self.path("outputs/chroma_db"))
+            self.last_retrieved_docs = results
         except Exception as exc:
+            self.last_retrieved_docs = []
             return f"检索失败：{exc}\n\n请确认已运行：`python scripts/build_knowledge_base.py`", []
 
         sources = [self.source_ref(item.get("source_file", ""), item.get("source_type", ""), item.get("evidence_strength", ""), item.get("score", "")) for item in results]
