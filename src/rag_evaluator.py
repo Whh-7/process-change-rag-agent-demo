@@ -132,6 +132,8 @@ def evaluate_results(
         "top1_source_file": normalize_source_file(top1.get("source_file", "")),
         "top1_source_type": top1.get("source_type", ""),
         "top1_score": top1.get("score", ""),
+        "top1_rerank_score": top1.get("rerank_score", ""),
+        "top1_rerank_reason": top1.get("rerank_reason", ""),
         "top1_text_preview": str(top1.get("text", ""))[:180].replace("\n", " "),
         "matched_rank": matched_rank,
         "matched_source_file": matched_source_file,
@@ -148,6 +150,8 @@ def evaluate_query(
     expected_evidence_strength: str,
     top_k: int,
     persist_dir: str | Path = "outputs/chroma_db",
+    use_rerank: bool = False,
+    candidate_k: int = 20,
 ) -> dict[str, Any]:
     """评估单个 query，检索失败时返回失败记录而不中断。"""
     case = {
@@ -160,7 +164,7 @@ def evaluate_query(
         "expected_evidence_strength": expected_evidence_strength,
     }
     try:
-        results = search_docs(query, top_k=top_k, persist_dir=persist_dir)
+        results = search_docs(query, top_k=top_k, persist_dir=persist_dir, use_rerank=use_rerank, candidate_k=candidate_k)
         return evaluate_results(case, results, top_k)
     except KeyboardInterrupt:
         raise
@@ -172,6 +176,8 @@ def evaluate_eval_set(
     eval_path: str | Path,
     top_k_values: list[int] | None = None,
     persist_dir: str | Path = "outputs/chroma_db",
+    use_rerank: bool = False,
+    candidate_k: int = 20,
 ) -> pd.DataFrame:
     """批量评估整个评估集。"""
     top_k_values = top_k_values or [1, 3, 5]
@@ -184,7 +190,7 @@ def evaluate_eval_set(
         query = str(case.get("query", ""))
         error_message = ""
         try:
-            results = search_docs(query, top_k=max_k, persist_dir=persist_dir)
+            results = search_docs(query, top_k=max_k, persist_dir=persist_dir, use_rerank=use_rerank, candidate_k=max(candidate_k, max_k))
         except KeyboardInterrupt:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -203,7 +209,13 @@ def rate(series: pd.Series) -> float:
     return round(float(series.mean()), 4)
 
 
-def summarize_results(results_df: pd.DataFrame) -> str:
+def summarize_results(
+    results_df: pd.DataFrame,
+    retrieval_mode: str = "",
+    use_rerank: bool | None = None,
+    generated_at: str = "",
+    python_executable: str = "",
+) -> str:
     """生成 Markdown 格式评估摘要。"""
     if results_df.empty:
         return "# RAG 评估摘要\n\n未生成评估结果。"
@@ -213,13 +225,24 @@ def summarize_results(results_df: pd.DataFrame) -> str:
     lines = [
         "# RAG 评估摘要",
         "",
+        f"- retrieval_mode: {retrieval_mode or '未记录'}",
+        f"- use_rerank: {use_rerank if use_rerank is not None else '未记录'}",
+        f"- generated_at: {generated_at or '未记录'}",
+        f"- python_executable: {python_executable or '未记录'}",
+        "",
         f"- 评估样本总数: {total_cases}",
         "",
-        "## 总体指标",
-        "",
-        "| top_k | source_file hit rate | source_type hit rate | keyword hit rate | evidence_strength hit rate | 平均 MRR | overall_pass 通过率 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if retrieval_mode == "keyword_fallback":
+        lines.extend(["> 注意：当前结果为 keyword fallback 模式，不应与 vector mode 结果直接比较。", ""])
+    lines.extend(
+        [
+            "## 总体指标",
+            "",
+            "| top_k | source_file hit rate | source_type hit rate | keyword hit rate | evidence_strength hit rate | 平均 MRR | overall_pass 通过率 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
     for top_k in top_values:
         subset = results_df[results_df["top_k"] == top_k]
         lines.append(
@@ -260,13 +283,67 @@ def summarize_results(results_df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def save_eval_outputs(results_df: pd.DataFrame, output_dir: str | Path = "outputs/eval") -> dict[str, Path]:
+def compare_with_baseline(baseline_df: pd.DataFrame, rerank_df: pd.DataFrame) -> str:
+    """生成 baseline vs rerank 对比摘要。"""
+    if baseline_df.empty or rerank_df.empty:
+        return "\n## Baseline vs Rerank 对比\n\n缺少 baseline 或 rerank 结果，无法对比。"
+    lines = [
+        "",
+        "## Baseline vs Rerank 对比",
+        "",
+        "| top_k | baseline overall_pass | rerank overall_pass | baseline MRR | rerank MRR |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for top_k in sorted(rerank_df["top_k"].unique().tolist()):
+        b = baseline_df[baseline_df["top_k"] == top_k]
+        r = rerank_df[rerank_df["top_k"] == top_k]
+        if b.empty or r.empty:
+            continue
+        lines.append(
+            f"| top{top_k} | {rate(b['overall_pass'])} | {rate(r['overall_pass'])} | "
+            f"{round(float(b['mrr'].mean()), 4)} | {round(float(r['mrr'].mean()), 4)} |"
+        )
+
+    max_k = int(rerank_df["top_k"].max())
+    b_top = baseline_df[baseline_df["top_k"] == max_k]
+    r_top = rerank_df[rerank_df["top_k"] == max_k]
+    merged = b_top[["case_id", "query_type", "overall_pass", "mrr"]].merge(
+        r_top[["case_id", "overall_pass", "mrr"]],
+        on="case_id",
+        suffixes=("_baseline", "_rerank"),
+    )
+    merged["pass_delta"] = merged["overall_pass_rerank"] - merged["overall_pass_baseline"]
+    merged["mrr_delta"] = merged["mrr_rerank"] - merged["mrr_baseline"]
+    lines.extend(["", "### query_type 提升情况", ""])
+    if merged.empty:
+        lines.append("- 无可对比记录")
+    else:
+        grouped = merged.groupby("query_type")[["pass_delta", "mrr_delta"]].mean().reset_index()
+        for _, row in grouped.sort_values("mrr_delta", ascending=False).iterrows():
+            lines.append(f"- {row['query_type']}: pass_delta={round(float(row['pass_delta']), 4)}, mrr_delta={round(float(row['mrr_delta']), 4)}")
+
+    failed = r_top[r_top["overall_pass"] == 0].head(10)
+    lines.extend(["", "### Rerank 后仍失败的 badcase", ""])
+    if failed.empty:
+        lines.append("- 无")
+    else:
+        for _, row in failed.iterrows():
+            lines.append(f"- {row['case_id']} | {row['query_type']} | {row['query']} | top1={row['top1_source_file']} / {row['top1_source_type']}")
+    return "\n".join(lines)
+
+
+def save_eval_outputs(
+    results_df: pd.DataFrame,
+    output_dir: str | Path = "outputs/eval",
+    suffix: str = "",
+    summary_text: str | None = None,
+) -> dict[str, Path]:
     """保存评估结果、失败样本和摘要。"""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    results_path = output_path / "rag_eval_results.csv"
-    failed_path = output_path / "rag_eval_failed_cases.csv"
-    summary_path = output_path / "rag_eval_summary.md"
+    results_path = output_path / f"rag_eval_results{suffix}.csv"
+    failed_path = output_path / f"rag_eval_failed_cases{suffix}.csv"
+    summary_path = output_path / f"rag_eval_summary{suffix}.md"
 
     results_df.to_csv(results_path, index=False, encoding="utf-8-sig")
     if results_df.empty:
@@ -275,6 +352,6 @@ def save_eval_outputs(results_df: pd.DataFrame, output_dir: str | Path = "output
         max_k = results_df["top_k"].max()
         failed_df = results_df[(results_df["top_k"] == max_k) & (results_df["overall_pass"] == 0)]
     failed_df.to_csv(failed_path, index=False, encoding="utf-8-sig")
-    summary_path.write_text(summarize_results(results_df), encoding="utf-8")
+    summary_path.write_text(summary_text or summarize_results(results_df), encoding="utf-8")
 
     return {"results": results_path, "failed": failed_path, "summary": summary_path}

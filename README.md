@@ -1,63 +1,106 @@
 # 流程配置变更 RAG + Agent 助手 Demo
 
-这是一个基于模拟数据的 AI 应用 demo，面向“流程配置变更”场景，展示如何把分散的业务资料转换为可检索知识库，并结合新旧配置差异分析、证据匹配和轻量 Agent Router，辅助业务人员进行变更复核。
+这是一个基于模拟数据的流程配置变更 RAG + Agent 助手 Demo，用于演示如何把分散的流程资料转成可检索知识库，并支持差异分析、证据匹配、复核建议和自然语言问答。
 
-当前 demo 支持：
-
-- 多来源资料解析
-- RAG 知识库构建
-- 新旧配置差异分析
-- 变更依据匹配
-- 复核优先级建议
-- 轻量 Agent Router
-- Streamlit 页面展示
+本项目全部使用虚构模拟数据，不包含任何真实公司、真实客户、真实人员或真实项目信息。
 
 ## 项目背景
 
-在流程配置更新过程中，系统导出表、部门更新表、任命通知、会议纪要、聊天记录、规则文档等资料往往分散在不同来源。人工核对时容易出现遗漏、依据强弱混淆、聊天记录被误当作正式依据、配置上下文被误判为变更原因等问题。
+流程配置更新时，信息来源通常分散在多个地方：
 
-本项目使用完全虚构的车企/汽车零部件项目开发流程数据，模拟“旧版配置 → 新版目标配置 → 差异识别 → 原始依据检索 → 证据分级 → 人工复核建议”的完整链路。
+- 系统导出表；
+- 部门在线更新表；
+- 任命调整通知；
+- 会议纪要；
+- 口头/聊天记录；
+- 流程规则文档；
+- 上传补充资料。
+
+人工核对时容易遗漏负责人、任务、阶段、交付物、审批角色和变更依据，也容易把配置上下文、规则说明、聊天线索和正式变更依据混在一起。本 demo 用 RAG + 规则 Agent 辅助检索、解释和复核，让变更清单、证据来源和复核优先级更可追踪。
+
+## 当前能力
+
+- 多来源模拟数据生成；
+- 新旧配置差异分析；
+- 文档解析与 chunk 切分；
+- Embedding 向量化；
+- ChromaDB 向量库；
+- keyword fallback；
+- RAG 检索测试；
+- 轻量 rerank；
+- retrieval_mode 标注；
+- strict-vector 检查；
+- 证据匹配；
+- 复核优先级；
+- Agent Router；
+- 可选 DeepSeek / OpenAI-compatible LLM API；
+- Streamlit 页面；
+- 文件上传进入知识库。
 
 ## 系统架构
 
 ```mermaid
 flowchart LR
-    A[数据层<br/>CSV / XLSX / Markdown / 可选 PDF] --> B[文档解析与 Chunk]
-    B --> C[RAG 知识库<br/>Sentence Transformers + ChromaDB]
-    A --> D[新旧配置差异分析]
-    D --> E[变更清单 change_report]
-    C --> F[证据检索]
-    E --> F
-    F --> G[证据匹配与复核优先级]
-    G --> H[轻量 Agent Router]
-    H --> I[Streamlit 页面]
-    C --> H
+    A[data 模拟资料] --> B[document_loader]
+    U[uploads 上传资料] --> B
+    B --> C[chunks]
+    C --> D[embedding]
+    D --> E[ChromaDB]
+    E --> F[search_docs]
+    F --> G[rerank]
+    A --> H[change_analyzer]
+    H --> I[change_report]
+    G --> J[evidence_matcher]
+    I --> J
+    J --> K[agent_router]
+    G --> K
+    K --> L[optional LLM]
+    L --> M[Streamlit UI]
+    K --> M
 ```
 
 ## 项目结构
 
 ```text
-data/                 模拟数据，全部为虚构信息
-src/                  核心模块代码
-scripts/              命令行脚本入口
-outputs/              运行输出目录，向量库缓存不建议提交
-docs/                 项目说明和运行手册
+data/                 虚构模拟数据
+uploads/              用户上传资料，真实上传文件不提交 GitHub
+eval/                 RAG 评估集
+src/                  核心模块
+scripts/              命令行脚本
+outputs/              运行输出和本地缓存
+docs/                 项目文档
 app.py                Streamlit Web Demo
 requirements.txt      Python 依赖
 ```
 
-## 核心模块说明
+核心模块：
 
-- `src/change_analyzer.py`：对比旧版配置和新版目标配置，生成结构化变更清单。
-- `src/document_loader.py`：解析 CSV、XLSX、Markdown 和可选 PDF，将资料切分为统一 chunk。
-- `src/rag_engine.py`：使用 `sentence-transformers + ChromaDB` 构建和检索本地知识库，并提供 keyword fallback。
-- `src/evidence_matcher.py`：把变更清单中的 `evidence_query` 与原始资料检索结果匹配，输出证据状态和复核优先级。
-- `src/agent_router.py`：轻量规则 Router，根据用户问题选择 RAG 检索、差异摘要、证据摘要、复核报告或状态检查。
-- `app.py`：Streamlit 页面，整合系统状态、Agent 问答、变更清单、证据匹配、复核报告和 RAG 检索测试。
+- `src/change_analyzer.py`：新旧配置差异分析；
+- `src/document_loader.py`：多格式资料解析和 chunk 切分；
+- `src/rag_engine.py`：sentence-transformers + ChromaDB 检索，以及 keyword fallback；
+- `src/reranker.py`：轻量规则 rerank；
+- `src/evidence_matcher.py`：证据匹配、证据状态和复核优先级；
+- `src/agent_router.py`：轻量 Agent Router；
+- `src/llm_client.py`：可选 OpenAI-compatible LLM 生成层；
+- `src/upload_manager.py`：上传文件保存、manifest 和配置表字段校验；
+- `app.py`：Streamlit 页面。
 
-## 安装环境
+## 完整运行流程
 
-推荐使用 Python 3.10+，也可以使用 Python 3.11 或 3.12。
+1. Step1 生成模拟数据；
+2. Step2 差异分析；
+3. Step3 构建知识库；
+4. Step4 检索测试；
+5. Step5 证据匹配；
+6. Step6 Agent Router；
+7. Step7 Streamlit 页面；
+8. Step8 RAG 评估；
+9. Step9 LLM API 可选接入；
+10. Step10 rerank；
+11. Step11 retrieval_mode 检查；
+12. Step12 文件上传。
+
+## 推荐命令
 
 Windows PowerShell：
 
@@ -67,145 +110,148 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-如果 PowerShell 禁止激活脚本，可在当前窗口临时放开执行策略：
+如果 PowerShell 禁止激活脚本：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-也可以不激活虚拟环境，直接使用 `.venv` 中的 Python：
+推荐 pipeline：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_change_analysis.py
-```
-
-## 运行流程
-
-完整流程：
-
-```bash
 python scripts/generate_mock_data.py
 python scripts/run_change_analysis.py
 python scripts/build_knowledge_base.py
+python scripts/check_rag_mode.py
 python scripts/match_change_evidence.py
+python scripts/run_rag_evaluation.py --strict-vector
+python scripts/run_rag_evaluation.py --rerank --strict-vector
 python scripts/run_agent.py "聊天记录能不能作为正式变更依据？"
 streamlit run app.py
 ```
 
-如果使用 `.venv` 的 Python：
+不激活虚拟环境时，也可以直接使用 venv 内的 Python：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_change_analysis.py
-.\.venv\Scripts\python.exe scripts\build_knowledge_base.py
-.\.venv\Scripts\python.exe scripts\match_change_evidence.py
+.\.venv\Scripts\python.exe scripts\run_agent.py "聊天记录能不能作为正式变更依据？"
 .\.venv\Scripts\streamlit.exe run app.py
+```
+
+## RAG 评估说明
+
+本项目当前评估 retrieval，不评估 LLM 生成。
+
+```powershell
+python scripts/check_rag_mode.py
+python scripts/run_rag_evaluation.py --strict-vector
+python scripts/run_rag_evaluation.py --rerank --strict-vector
 ```
 
 说明：
 
-- `scripts/generate_mock_data.py` 会重新生成 `data/` 下的模拟资料。
-- `scripts/run_change_analysis.py` 会生成 `outputs/change_report.csv`。
-- `scripts/build_knowledge_base.py` 会解析 `data/` 下原始资料并构建本地知识库。
-- `scripts/match_change_evidence.py` 会生成 `outputs/change_report_with_evidence.csv` 和 `outputs/evidence_summary.md`。
-- `streamlit run app.py` 会启动 Web Demo。
+- baseline 和 rerank 分开评估、分开输出；
+- 必须在同一 `retrieval_mode` 下比较；
+- vector mode 下，轻量 rerank 主要提升 top3/top5，top1 只有小幅提升；
+- rerank 只能重排序已召回候选，不能解决正确文档未召回的问题；
+- 后续可做 query rewrite、hybrid search、模型 reranker、chunk 优化和 metadata 过滤。
+
+输出位置：
+
+```text
+outputs/eval/rag_eval_summary.md
+outputs/eval/rag_eval_results.csv
+outputs/eval/rag_eval_failed_cases.csv
+outputs/eval/rag_eval_summary_rerank.md
+outputs/eval/rag_eval_results_rerank.csv
+outputs/eval/rag_eval_failed_cases_rerank.csv
+```
+
+## 文件上传说明
+
+Streamlit 页面提供“文件上传”入口。
+
+支持格式：
+
+- `.csv`
+- `.xlsx`
+- `.md`
+- `.txt`
+- `.pdf`
+
+边界：
+
+- PDF 仅支持文本型 PDF；
+- 当前版本不支持扫描 PDF OCR；
+- 上传文件保存到 `uploads/`；
+- 上传后需要重新构建知识库，才会进入 RAG 检索；
+- 当前版本上传的 `old_config` / `target_config` 只进入知识库，不自动替换 `data/` 中的主配置表；
+- 上传配置表会做基础字段校验，但不会自动参与新旧配置差异分析；
+- 真实上传文件、`uploads/upload_manifest.csv` 不提交 GitHub。
+
+## LLM API 说明
+
+默认可不启用 LLM。未配置 `.env`、`LLM_ENABLE=false` 或未检测到有效 API key 时，系统使用规则模板回答。
+
+启用 DeepSeek / OpenAI-compatible API：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+编辑 `.env`：
+
+```text
+LLM_ENABLE=true
+LLM_API_KEY=your_real_api_key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+```
+
+注意：
+
+- `.env` 不提交；
+- `.env.example` 可以提交；
+- LLM 只用于回答生成和报告润色；
+- LLM 不替代差异分析、证据匹配、证据强弱判断和复核优先级规则；
+- 切换到其他 OpenAI-compatible 服务时，通常只需要修改 `LLM_BASE_URL` 和 `LLM_MODEL`。
 
 ## 示例问题
-
-可以在命令行 Agent 或 Streamlit 页面中尝试：
 
 - 聊天记录能不能作为正式变更依据？
 - 旧配置表和新版配置表能不能证明变更原因？
 - 新旧配置有哪些变化？
 - 哪些变化缺少强变更依据？
 - 生成一份本次流程配置变更复核建议报告。
+- SOP 阶段有哪些复核要求？
 - 新增任务节点需要校验哪些字段？
+- 请检索 A样阶段新增电控测试复核节点 的相关依据
 
-## RAG 评估
+## 当前限制
 
-本项目新增轻量 RAG 评估集和评估脚本，用于检查当前知识库的检索效果。评估对象是 retrieval，不评估 LLM 生成质量，也不使用大模型做 judge。
-
-评估集位于：
-
-```text
-eval/rag_eval_set.csv
-```
-
-评估指标包括：
-
-- `hit@k_by_source_file`：top-k 是否命中期望来源文件。
-- `hit@k_by_source_type`：top-k 是否命中期望来源类型。
-- `keyword_hit@k`：top-k 文本是否包含期望关键词。
-- `evidence_strength_hit@k`：top-k 是否命中期望证据强度。
-- `MRR`：按 source_file 或 source_type 首次命中的 rank 计算 reciprocal rank。
-- `overall_pass`：命中 source_file，或同时命中 source_type 和关键词，即视为通过。
-
-运行评估前请先构建知识库：
-
-```bash
-python scripts/build_knowledge_base.py
-python scripts/run_rag_evaluation.py
-```
-
-输出文件：
-
-```text
-outputs/eval/rag_eval_results.csv
-outputs/eval/rag_eval_summary.md
-outputs/eval/rag_eval_failed_cases.csv
-```
-
-## 大模型 API 可选接入
-
-当前项目默认不需要 API key。未配置 `.env`、`LLM_ENABLE=false` 或未检测到有效 `LLM_API_KEY` 时，系统会自动使用规则模板回答，原有差异分析、RAG 检索、证据匹配和 Streamlit 页面都可以正常运行。
-
-如需启用 DeepSeek 官方 OpenAI-compatible API：
-
-1. 复制示例配置：
-
-```powershell
-Copy-Item .env.example .env
-```
-
-2. 编辑 `.env`，填写自己的 `LLM_API_KEY`，并设置：
-
-```text
-LLM_ENABLE=true
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-flash
-```
-
-3. 重新运行 Agent 或 Streamlit 页面。
-
-注意：
-
-- 不要提交 `.env`，仓库只提交 `.env.example`。
-- 不要把 API key 写进代码、README 或截图。
-- LLM 只用于回答生成和报告润色，不负责差异分析、证据匹配、证据强弱判断或复核优先级判断。
-- 如果要切换到 Qwen/OpenAI 或其他 OpenAI-compatible 模型，只需要修改 `LLM_BASE_URL` 和 `LLM_MODEL`。
-- 当前 demo 使用的都是虚构模拟数据，不包含真实公司、真实客户或真实人员信息。
-
-## 当前版本能力
-
-当前版本为 `v0.1`：
-
-- 已完成规则 Router。
-- 已完成 RAG 检索。
-- 已完成证据匹配。
-- 已完成页面展示。
-- 已完成轻量 RAG 检索评估。
-- 已支持可选 OpenAI-compatible 大模型 API 作为表达层增强，默认关闭。
-- 暂未做大规模人工标注评估集。
+- 模拟数据规模较小；
+- 上传文件暂不自动参与差异分析；
+- 暂不支持飞书 API；
+- 暂不支持增量建库；
+- 暂不支持扫描 PDF OCR；
+- 暂未做 LLM 生成质量评估；
+- Agent Router 是轻量规则路由，不是 LangGraph 状态机；
+- 轻量 rerank 不能解决候选召回不足的问题；
+- Streamlit 页面是演示入口，不包含复杂权限系统。
 
 ## 后续计划
 
-- 接入大模型 API，用于基于检索结果生成更自然的回答和报告。
-- 构建 RAG 评估集，统计 top-k 命中率和证据准确率。
-- 支持上传 Excel/PDF。
-- 支持飞书 API 或导出表接入。
-- 支持增量建库。
-- 支持人工复核状态流。
+- 上传配置表参与差异分析；
+- 飞书 API 或导出表接入；
+- 增量建库；
+- query rewrite；
+- hybrid search；
+- 模型 reranker；
+- LLM 生成质量评估；
+- 人工复核状态流；
+- LangGraph 状态编排；
+- 权限与多部门协作。
 
 ## 免责声明
 
-本项目全部使用虚构模拟数据，不包含任何真实公司、真实客户、真实人员或真实项目信息。项目仅用于技术演示和学习交流，不代表任何真实企业业务流程。
+本项目全部使用虚构模拟数据，不包含任何真实公司、真实客户、真实人员或真实项目信息。项目仅用于技术演示和学习交流。

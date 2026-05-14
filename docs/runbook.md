@@ -1,6 +1,8 @@
 # 运行手册
 
-## 创建和激活虚拟环境
+本文档用于从零运行项目、排查环境问题，并说明上传、评估、LLM 和常见故障处理方式。
+
+## 1. 创建虚拟环境
 
 Windows PowerShell：
 
@@ -24,62 +26,177 @@ python --version
 python -c "import sys; print(sys.executable)"
 ```
 
-不激活虚拟环境也可以直接运行：
+不激活虚拟环境时，可以直接运行：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_change_analysis.py
 ```
 
-## 推荐运行顺序
+## 2. 从零运行完整 pipeline
 
-```bash
+```powershell
 python scripts/generate_mock_data.py
 python scripts/run_change_analysis.py
 python scripts/build_knowledge_base.py
+python scripts/check_rag_mode.py
 python scripts/match_change_evidence.py
-python scripts/inspect_evidence_matches.py
+python scripts/run_rag_evaluation.py --strict-vector
+python scripts/run_rag_evaluation.py --rerank --strict-vector
 python scripts/run_agent.py "聊天记录能不能作为正式变更依据？"
 streamlit run app.py
 ```
 
-## vector mode 和 keyword fallback
+如果你使用 `.venv` 但没有激活：
 
-项目优先使用 `sentence-transformers + ChromaDB` 的 vector mode。
+```powershell
+.\.venv\Scripts\python.exe scripts\build_knowledge_base.py
+.\.venv\Scripts\python.exe scripts\check_rag_mode.py
+.\.venv\Scripts\streamlit.exe run app.py
+```
 
-- 优点：语义检索能力更强，适合中文自然语言 query。
-- 首次运行可能较慢，因为需要下载或加载 embedding 模型。
-- 构建后的本地向量库位于 `outputs/chroma_db/`。
+## 3. 确认 vector mode
 
-如果依赖不可用、模型加载失败或 ChromaDB 无法连接，系统会自动切换到 keyword fallback mode。
+运行：
 
-- 优点：不依赖向量模型，保证 demo 基本可运行。
-- 局限：只基于关键词重叠，召回质量不如 vector mode。
+```powershell
+python scripts/check_rag_mode.py
+```
 
-## ChromaDB 文件占用处理
+需要同时满足：
 
-Windows 下，如果 Streamlit 页面已经执行过 RAG 检索，当前进程可能会占用 `outputs/chroma_db/` 文件。此时点击页面里的“构建知识库”按钮可能出现 `PermissionError: WinError 32`。
+- 可以 import `sentence_transformers`；
+- 可以 import `chromadb`；
+- `outputs/chroma_db` 存在；
+- ChromaDB collection 能连接；
+- collection 中有 chunk。
 
-处理方式：
+如果任一条件不满足，系统会 fallback 到 keyword mode。fallback 是为了保证 demo 可运行，但不应该把 keyword fallback 指标和 vector mode 指标直接比较。
 
-1. 关闭 Streamlit 页面。
-2. 回到终端。
-3. 运行：
+## 4. 排查 keyword fallback
 
-```bash
+常见原因：
+
+- 当前 Python 不是 `.venv`，依赖没有安装；
+- `sentence_transformers` 或 `chromadb` 缺失；
+- `outputs/chroma_db` 没有构建；
+- ChromaDB 目录损坏或被占用；
+- collection 名称或持久化目录不匹配。
+
+处理建议：
+
+```powershell
+python -m pip install -r requirements.txt
+python scripts/build_knowledge_base.py
+python scripts/check_rag_mode.py
+```
+
+如果你怀疑当前 Python 环境不对：
+
+```powershell
+python -c "import sys; print(sys.executable)"
+.\.venv\Scripts\python.exe scripts\check_rag_mode.py
+```
+
+## 5. 运行差异分析
+
+```powershell
+python scripts/run_change_analysis.py
+```
+
+输出：
+
+```text
+outputs/change_report.csv
+outputs/change_report.xlsx
+outputs/change_summary.md
+```
+
+## 6. 构建知识库
+
+```powershell
 python scripts/build_knowledge_base.py
 ```
 
-不要手动强删正在被占用的 ChromaDB 目录。
+输出：
 
-## 启动 Streamlit 页面
+```text
+outputs/chroma_db/
+outputs/chunks_preview.csv
+outputs/kb_build_summary.md
+```
 
-激活虚拟环境后：
+注意：`outputs/change_report.csv` 是系统分析结果，不会进入知识库。知识库只加载 `data/` 和 `uploads/` 中的原始资料。
+
+## 7. ChromaDB 文件占用处理
+
+Windows 下，如果 Streamlit 页面已经使用过 RAG 检索，当前进程可能占用 `outputs/chroma_db/`。这时点击页面里的“构建知识库”按钮，可能出现 `PermissionError: WinError 32`。
+
+处理方式：
+
+1. 关闭 Streamlit 页面；
+2. 关闭可能占用 ChromaDB 的终端进程；
+3. 回到终端运行：
+
+```powershell
+python scripts/build_knowledge_base.py
+```
+
+不要强行删除正在被占用的 ChromaDB 目录。
+
+## 8. RAG 检索测试
+
+```powershell
+python scripts/search_knowledge_base.py "SOP阶段有哪些复核要求？"
+python scripts/search_knowledge_base.py "请检索 A样阶段新增电控测试复核节点 的相关依据"
+```
+
+如果启用了 rerank 的入口，例如 Agent Router 或 Streamlit 检索页，结果中可能出现 `rerank_score` 和 `rerank_reason`。
+
+## 9. 证据匹配
+
+```powershell
+python scripts/match_change_evidence.py
+```
+
+输出：
+
+```text
+outputs/change_report_with_evidence.csv
+outputs/change_report_with_evidence.xlsx
+outputs/evidence_summary.md
+```
+
+检查结果：
+
+```powershell
+python scripts/inspect_evidence_matches.py
+```
+
+## 10. Agent Router
+
+单次问题：
+
+```powershell
+python scripts/run_agent.py "聊天记录能不能作为正式变更依据？"
+python scripts/run_agent.py "新旧配置有哪些变化？"
+python scripts/run_agent.py "生成一份本次流程配置变更复核建议报告"
+```
+
+交互模式：
+
+```powershell
+python scripts/run_agent.py
+```
+
+Agent Router 使用规则判断 intent，并调用对应工具。它不是 LangGraph 状态机。
+
+## 11. Streamlit 页面
 
 ```powershell
 streamlit run app.py
 ```
 
-不激活虚拟环境：
+或：
 
 ```powershell
 .\.venv\Scripts\streamlit.exe run app.py
@@ -87,61 +204,92 @@ streamlit run app.py
 
 页面包含：
 
-- 系统状态
-- Agent 问答
-- 变更清单
-- 证据匹配
-- 复核建议报告
-- RAG 检索测试
+- 系统状态；
+- 文件上传；
+- Agent 问答；
+- 变更清单；
+- 证据匹配；
+- 复核建议报告；
+- RAG 检索测试。
 
-## 运行 RAG 评估
+## 12. 上传文件
 
-RAG 评估用于检查 `search_docs()` 的检索命中效果。当前只评估 retrieval，不评估大模型生成。
+支持格式：
 
-先确保知识库已经构建：
+- `.csv`
+- `.xlsx`
+- `.md`
+- `.txt`
+- `.pdf`
 
-```bash
-python scripts/build_knowledge_base.py
-```
+PDF 只支持文本型 PDF，扫描件 OCR 当前不支持。
 
-然后运行：
+操作步骤：
 
-```bash
-python scripts/run_rag_evaluation.py
-```
+1. 启动页面；
+2. 进入“文件上传”Tab；
+3. 选择文件；
+4. 选择 `source_type`；
+5. 填写可选说明；
+6. 点击“保存上传文件”；
+7. 重新构建知识库；
+8. 到“RAG 检索测试”页输入上传文件中的关键词验证；
+9. 也可以在 Agent 问答中使用“请检索 xxx 的相关依据”。
 
-如果使用 `.venv`：
+`source_type` 选择建议：
+
+- 部门在线更新表：`department_update`
+- 任命通知：`appointment_notice`
+- 会议纪要：`meeting_minutes`
+- 聊天记录/口头通知：`chat_message`
+- 规则文档：`rule_manual`
+- 旧配置表：`old_config`
+- 新版目标配置表：`target_config`
+- 其他补充资料：`other`
+
+配置表字段要求：
+
+- 必须字段：`business_domain`、`phase`、`task_name`
+- 推荐字段：`owner_name`、`responsible_department`、`deliverable`、`approval_role`
+
+当前版本上传的配置表只进入知识库，不自动替换主配置表，也不自动参与差异分析。
+
+## 13. RAG 评估
+
+先检查模式：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_rag_evaluation.py
+python scripts/check_rag_mode.py
 ```
 
-评估集：
+baseline：
 
-```text
-eval/rag_eval_set.csv
+```powershell
+python scripts/run_rag_evaluation.py --strict-vector
+```
+
+rerank：
+
+```powershell
+python scripts/run_rag_evaluation.py --rerank --strict-vector
 ```
 
 输出：
 
 ```text
-outputs/eval/rag_eval_results.csv
 outputs/eval/rag_eval_summary.md
+outputs/eval/rag_eval_results.csv
 outputs/eval/rag_eval_failed_cases.csv
+outputs/eval/rag_eval_summary_rerank.md
+outputs/eval/rag_eval_results_rerank.csv
+outputs/eval/rag_eval_failed_cases_rerank.csv
 ```
 
-主要指标：
+baseline 和 rerank 必须在同一 `retrieval_mode` 下比较。
 
-- source_file hit rate：是否命中期望来源文件。
-- source_type hit rate：是否命中期望来源类型。
-- keyword hit rate：检索文本是否包含期望关键词。
-- evidence_strength hit rate：证据强度是否符合预期。
-- MRR：首次命中的倒数排名。
-- overall_pass：综合通过率。
+## 14. 启用或关闭 LLM
 
-## 可选启用 LLM
-
-默认情况下不需要配置 LLM。没有 `.env` 或 `LLM_ENABLE=false` 时，Agent Router 会使用规则模板回答。
+默认不需要 LLM。
 
 创建 `.env`：
 
@@ -149,7 +297,7 @@ outputs/eval/rag_eval_failed_cases.csv
 Copy-Item .env.example .env
 ```
 
-启用 DeepSeek OpenAI-compatible API：
+启用：
 
 ```text
 LLM_ENABLE=true
@@ -161,62 +309,34 @@ LLM_TEMPERATURE=0.2
 LLM_MAX_TOKENS=1200
 ```
 
-关闭 LLM：
+关闭：
 
 ```text
 LLM_ENABLE=false
 ```
 
-检查当前是否使用 LLM：
+检查：
 
-- 命令行 `scripts/run_agent.py` 会打印 `llm_used` 和 `fallback_reason`。
-- Streamlit 页面顶部和“系统状态”Tab 会显示 LLM 配置状态，但不会显示 API key。
-- Agent 问答 Tab 会展示 `llm_used` 和 `fallback_reason`。
+- 命令行 Agent 会输出 `llm_used` 和 `fallback_reason`；
+- Streamlit 页面会展示 LLM 状态，但不会展示 API key；
+- API 调用失败时自动回退到规则模板。
 
-常见问题：
+LLM 只用于回答生成和报告润色，不替代差异分析、证据匹配和复核规则。
 
-- `llm_used=false`：通常表示 `LLM_ENABLE=false`、未检测到 API key，或 API 调用失败。
-- API key 未检测到：检查 `.env` 是否存在，`LLM_API_KEY` 是否仍为 `your_api_key_here`。
-- API 调用失败：检查网络、额度、`LLM_BASE_URL` 和 `LLM_MODEL`。
-- base_url 或 model 配错：修改 `.env` 后重启命令行进程或 Streamlit 页面。
-- 如何回退规则模板：把 `LLM_ENABLE=false`，或暂时移除 `.env`。
+## 15. Git 提交注意事项
 
-安全提醒：
+不要提交：
 
-- 不要提交 `.env`。
-- 不要在日志、截图或文档中暴露 API key。
-- LLM 只用于回答生成和报告润色，不替代差异分析、证据强弱判断和复核优先级规则。
+- `.env`
+- `.env.*`
+- `uploads/` 下真实上传文件
+- `uploads/upload_manifest.csv`
+- `outputs/chroma_db/`
+- 大体积缓存、sqlite、parquet、日志文件
 
-## 常见问题
+可以提交：
 
-### 页面提示缺少 change_report.csv
-
-运行：
-
-```bash
-python scripts/run_change_analysis.py
-```
-
-### 页面提示知识库未构建
-
-运行：
-
-```bash
-python scripts/build_knowledge_base.py
-```
-
-### 页面提示缺少证据匹配结果
-
-运行：
-
-```bash
-python scripts/match_change_evidence.py
-```
-
-### Streamlit 按钮使用了错误 Python 环境
-
-页面按钮内部使用 `sys.executable` 调用脚本。请确认 Streamlit 本身是从 `.venv` 启动的：
-
-```powershell
-.\.venv\Scripts\streamlit.exe run app.py
-```
+- `uploads/.gitkeep`
+- `outputs/.gitkeep`
+- `eval/rag_eval_set.csv`
+- 源码、脚本和文档

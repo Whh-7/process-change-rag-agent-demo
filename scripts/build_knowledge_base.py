@@ -48,6 +48,18 @@ def write_build_summary(stats: dict, output_path: Path) -> None:
     for name, count in stats.get("evidence_strength_counts", {}).items():
         lines.append(f"- {name}: {count}")
 
+    lines.extend(["", "## 上传文件", ""])
+    uploaded = stats.get("uploaded_files", [])
+    if uploaded:
+        lines.extend(f"- {file_name}" for file_name in uploaded)
+    else:
+        lines.append("- 无")
+
+    warnings = stats.get("upload_warnings", [])
+    if warnings:
+        lines.extend(["", "## 上传文件警告", ""])
+        lines.extend(f"- {item}" for item in warnings)
+
     if stats.get("vector_error"):
         lines.extend(["", "## 向量模式降级原因", "", str(stats["vector_error"])])
 
@@ -67,6 +79,9 @@ def main() -> None:
     print(f"读取文件数：{stats.get('loaded_file_count', 0)}")
     print(f"跳过重复 xlsx 数：{stats.get('skipped_duplicate_xlsx_count', 0)}")
     print(f"生成 chunk 数：{stats.get('chunk_count', 0)}")
+    print(f"上传文件数：{stats.get('uploaded_file_count', 0)}")
+    for warning in stats.get("upload_warnings", []):
+        print(f"上传警告：{warning}")
     print("source_type 统计：")
     for name, count in stats.get("source_type_counts", {}).items():
         print(f"- {name}: {count}")

@@ -28,3 +28,7 @@ outputs/**/*.sqlite
 outputs/**/*.sqlite3
 outputs/**/*.parquet
 *.log
+
+# Uploaded user files
+uploads/*
+!uploads/.gitkeep

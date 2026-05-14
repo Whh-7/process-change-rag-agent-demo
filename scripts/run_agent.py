@@ -40,7 +40,8 @@ def print_result(result: dict) -> None:
                     f"- {source.get('source_file', '')} | "
                     f"{source.get('source_type', '')} | "
                     f"{source.get('evidence_strength', '')} | "
-                    f"{source.get('score', '')}"
+                    f"{source.get('score', '')} | "
+                    f"rerank={source.get('rerank_score', '')}"
                 )
             else:
                 print(f"- {source}")
