@@ -130,6 +130,20 @@ class AgentRouter:
             "score": score,
         }
 
+    def source_ref_from_result(self, item: dict[str, Any]) -> dict[str, Any]:
+        """从检索结果构造 sources，兼容 rerank 字段。"""
+        row = self.source_ref(
+            item.get("source_file", ""),
+            item.get("source_type", ""),
+            item.get("evidence_strength", ""),
+            item.get("score", ""),
+        )
+        if "rerank_score" in item:
+            row["rerank_score"] = item.get("rerank_score", "")
+        if "rerank_reason" in item:
+            row["rerank_reason"] = item.get("rerank_reason", "")
+        return row
+
     def read_csv_safe(self, relative: str) -> pd.DataFrame | None:
         """安全读取 CSV，缺失时返回 None。"""
         path = self.path(relative)
@@ -409,13 +423,17 @@ class AgentRouter:
     def run_rag_search(self, user_query: str, include_raw_chunks: bool = True) -> tuple[str, list[dict[str, Any]]]:
         """调用 RAG 检索并格式化结果。"""
         try:
-            results = search_docs(user_query, top_k=5, persist_dir=self.path("outputs/chroma_db"))
+            results = search_docs(user_query, top_k=5, persist_dir=self.path("outputs/chroma_db"), use_rerank=True, candidate_k=20)
             self.last_retrieved_docs = results
         except Exception as exc:
-            self.last_retrieved_docs = []
-            return f"检索失败：{exc}\n\n请确认已运行：`python scripts/build_knowledge_base.py`", []
+            try:
+                results = search_docs(user_query, top_k=5, persist_dir=self.path("outputs/chroma_db"))
+                self.last_retrieved_docs = results
+            except Exception as fallback_exc:
+                self.last_retrieved_docs = []
+                return f"检索失败：{fallback_exc}\n\n请确认已运行：`python scripts/build_knowledge_base.py`", []
 
-        sources = [self.source_ref(item.get("source_file", ""), item.get("source_type", ""), item.get("evidence_strength", ""), item.get("score", "")) for item in results]
+        sources = [self.source_ref_from_result(item) for item in results]
         judgment = self.brief_rag_judgment(user_query, results)
         lines = ["## 基于检索结果的简要判断", judgment, ""]
         if include_raw_chunks:
@@ -424,7 +442,8 @@ class AgentRouter:
                 lines.append("未检索到相关资料。")
             for item in results:
                 text = str(item.get("text", ""))[:220].replace("\n", " ")
-                lines.append(f"- Rank {item.get('rank', '')} | {item.get('source_file', '')} | {item.get('source_type', '')} | score={item.get('score', '')}: {text}")
+                rerank_part = f" | rerank_score={item.get('rerank_score', '')}" if "rerank_score" in item else ""
+                lines.append(f"- Rank {item.get('rank', '')} | {item.get('source_file', '')} | {item.get('source_type', '')} | score={item.get('score', '')}{rerank_part}: {text}")
         else:
             lines.append("相关来源已列在 sources 中。")
         return "\n".join(lines), sources

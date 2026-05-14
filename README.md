@@ -144,8 +144,33 @@ eval/rag_eval_set.csv
 
 ```bash
 python scripts/build_knowledge_base.py
+python scripts/check_rag_mode.py
 python scripts/run_rag_evaluation.py
 ```
+
+启用轻量规则 rerank 后再评估：
+
+```bash
+python scripts/run_rag_evaluation.py --rerank
+```
+
+推荐在正式对比时使用严格 vector 模式：
+
+```bash
+python scripts/run_rag_evaluation.py --strict-vector
+python scripts/run_rag_evaluation.py --rerank --strict-vector
+```
+
+Rerank 的目标是把已经召回到候选集中的正确证据排到更靠前的位置，提升 top1 命中率和 MRR。当前实现为轻量规则版，不依赖大模型，也不下载大型 reranker 模型。后续可替换为 `bge-reranker` 或 cross-encoder。
+
+baseline 与 rerank 分开评估、分开保存：
+
+- baseline：`outputs/eval/rag_eval_summary.md`、`outputs/eval/rag_eval_results.csv`
+- rerank：`outputs/eval/rag_eval_summary_rerank.md`、`outputs/eval/rag_eval_results_rerank.csv`
+
+当前轻量 rerank 主要提升 top3/top5 和部分 `change_evidence` 类问题。top1 提升有限时，后续可考虑模型 reranker 或 query rewrite。
+
+评估 summary 会记录 `retrieval_mode`、`use_rerank`、`generated_at` 和 `python_executable`。`vector` 与 `keyword_fallback` 的指标不可直接比较；如果结果为 keyword fallback，通常说明 `sentence_transformers` 或 ChromaDB 向量库不可用。
 
 输出文件：
 
@@ -153,6 +178,9 @@ python scripts/run_rag_evaluation.py
 outputs/eval/rag_eval_results.csv
 outputs/eval/rag_eval_summary.md
 outputs/eval/rag_eval_failed_cases.csv
+outputs/eval/rag_eval_results_rerank.csv
+outputs/eval/rag_eval_summary_rerank.md
+outputs/eval/rag_eval_failed_cases_rerank.csv
 ```
 
 ## 大模型 API 可选接入

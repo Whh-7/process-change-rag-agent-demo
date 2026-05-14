@@ -90,6 +90,23 @@ def read_text_safe(path: Path) -> str:
         return ""
 
 
+def parse_eval_summary_meta(path: Path) -> dict[str, str]:
+    """从评估 summary 顶部解析 retrieval_mode / generated_at 等信息。"""
+    text = read_text_safe(path)
+    meta: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line.startswith("- "):
+            continue
+        body = line[2:]
+        if ":" not in body:
+            continue
+        key, value = body.split(":", 1)
+        key = key.strip()
+        if key in {"retrieval_mode", "use_rerank", "generated_at", "python_executable"}:
+            meta[key] = value.strip()
+    return meta
+
+
 def run_script(script_relative: str) -> subprocess.CompletedProcess[str] | None:
     """通过当前 Python 解释器运行项目脚本，并捕获输出。"""
     script_path = ROOT_DIR / script_relative
@@ -276,6 +293,8 @@ def show_sources_table(sources: list[dict[str, Any]]) -> None:
                 "source_type": source.get("source_type", ""),
                 "evidence_strength": source.get("evidence_strength", ""),
                 "score": source.get("score", ""),
+                "rerank_score": source.get("rerank_score", ""),
+                "rerank_reason": source.get("rerank_reason", ""),
             }
         )
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -566,6 +585,7 @@ def show_rag_test_tab() -> None:
 
     query = st.text_area("检索 query", key="rag_query", height=80)
     top_k = st.selectbox("top_k", [3, 5, 10], index=1, key="rag_test_tab_top_k")
+    use_rerank = st.checkbox("启用 rerank 重排序", value=False, key="rag_test_tab_use_rerank")
 
     if st.button("开始检索", key="rag_test_tab_submit", type="primary"):
         if not query.strip():
@@ -573,7 +593,13 @@ def show_rag_test_tab() -> None:
             return
         with st.spinner("正在检索知识库..."):
             try:
-                results = search_docs(query, top_k=int(top_k), persist_dir=ROOT_DIR / "outputs/chroma_db")
+                results = search_docs(
+                    query,
+                    top_k=int(top_k),
+                    persist_dir=ROOT_DIR / "outputs/chroma_db",
+                    use_rerank=use_rerank,
+                    candidate_k=20,
+                )
             except Exception as exc:  # noqa: BLE001
                 st.error(f"检索失败：{exc}")
                 kb_dir = ROOT_DIR / "outputs/chroma_db"
@@ -592,6 +618,8 @@ def show_rag_test_tab() -> None:
                 "source_file": item.get("source_file", ""),
                 "source_type": item.get("source_type", ""),
                 "evidence_strength": item.get("evidence_strength", ""),
+                "rerank_score": item.get("rerank_score", ""),
+                "rerank_reason": item.get("rerank_reason", ""),
                 "text": item.get("text", ""),
             }
             for item in results
@@ -600,6 +628,59 @@ def show_rag_test_tab() -> None:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else:
             st.info("未检索到结果。")
+
+    show_rag_eval_section()
+
+
+def show_rag_eval_section() -> None:
+    """明确区分 baseline 与 rerank 的评估展示。"""
+    st.divider()
+    st.subheader("RAG 评估结果")
+    baseline_summary = ROOT_DIR / "outputs/eval/rag_eval_summary.md"
+    baseline_results = ROOT_DIR / "outputs/eval/rag_eval_results.csv"
+    rerank_summary = ROOT_DIR / "outputs/eval/rag_eval_summary_rerank.md"
+    rerank_results = ROOT_DIR / "outputs/eval/rag_eval_results_rerank.csv"
+
+    if baseline_summary.exists() and rerank_summary.exists():
+        diff_seconds = abs(baseline_summary.stat().st_mtime - rerank_summary.stat().st_mtime)
+        if diff_seconds > 600:
+            st.warning("baseline 和 rerank 评估文件可能不是同一轮生成，建议重新运行两条评估命令。")
+        baseline_meta = parse_eval_summary_meta(baseline_summary)
+        rerank_meta = parse_eval_summary_meta(rerank_summary)
+        baseline_mode = baseline_meta.get("retrieval_mode", "未记录")
+        rerank_mode = rerank_meta.get("retrieval_mode", "未记录")
+        if baseline_mode != rerank_mode:
+            st.warning("Baseline 与 Rerank 使用了不同检索模式，指标不可直接比较。")
+        if baseline_mode == "keyword_fallback" or rerank_mode == "keyword_fallback":
+            st.warning("当前评估不是 vector mode，可能是 sentence_transformers 不可用。")
+
+    with st.expander("Baseline 评估结果：outputs/eval/rag_eval_summary.md", expanded=False):
+        if baseline_summary.exists():
+            meta = parse_eval_summary_meta(baseline_summary)
+            st.caption("摘要文件：outputs/eval/rag_eval_summary.md")
+            st.info(f"retrieval_mode: {meta.get('retrieval_mode', '未记录')} | generated_at: {meta.get('generated_at', '未记录')}")
+            if meta.get("retrieval_mode") == "keyword_fallback":
+                st.warning("当前评估不是 vector mode，可能是 sentence_transformers 不可用。")
+            st.markdown(read_text_safe(baseline_summary))
+        else:
+            st.info("baseline 不存在：请运行 `python scripts/run_rag_evaluation.py`")
+        if baseline_results.exists():
+            st.caption("明细文件：outputs/eval/rag_eval_results.csv")
+            st.dataframe(load_csv_safe(baseline_results), use_container_width=True, hide_index=True)
+
+    with st.expander("Rerank 评估结果：outputs/eval/rag_eval_summary_rerank.md", expanded=False):
+        if rerank_summary.exists():
+            meta = parse_eval_summary_meta(rerank_summary)
+            st.caption("摘要文件：outputs/eval/rag_eval_summary_rerank.md")
+            st.info(f"retrieval_mode: {meta.get('retrieval_mode', '未记录')} | generated_at: {meta.get('generated_at', '未记录')}")
+            if meta.get("retrieval_mode") == "keyword_fallback":
+                st.warning("当前评估不是 vector mode，可能是 sentence_transformers 不可用。")
+            st.markdown(read_text_safe(rerank_summary))
+        else:
+            st.info("rerank 不存在：请运行 `python scripts/run_rag_evaluation.py --rerank`")
+        if rerank_results.exists():
+            st.caption("明细文件：outputs/eval/rag_eval_results_rerank.csv")
+            st.dataframe(load_csv_safe(rerank_results), use_container_width=True, hide_index=True)
 
 
 def main() -> None:

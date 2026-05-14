@@ -13,11 +13,13 @@ import json
 import math
 import re
 import shutil
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from document_loader import DocumentChunk, load_documents, write_chunks_preview
+from reranker import rerank_results
 
 
 DEFAULT_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
@@ -194,6 +196,56 @@ def get_runtime_search_mode(persist_dir: str | Path = "outputs/chroma_db") -> st
     return "vector"
 
 
+def inspect_rag_mode(persist_dir: str | Path = "outputs/chroma_db") -> dict[str, Any]:
+    """检查当前环境是否具备 vector mode 条件，不加载 embedding 模型。"""
+    persist_path = Path(persist_dir)
+    reasons: list[str] = []
+    kb_mode = load_kb_mode(persist_path)
+    can_import_sentence_transformers = False
+    can_import_chromadb = False
+    chroma_collection_ok = False
+
+    try:
+        import sentence_transformers  # noqa: F401
+
+        can_import_sentence_transformers = True
+    except Exception as exc:  # noqa: BLE001
+        reasons.append(f"无法 import sentence_transformers: {exc}")
+
+    try:
+        import chromadb
+
+        can_import_chromadb = True
+        if kb_mode == "vector":
+            try:
+                client = chromadb.PersistentClient(path=str(persist_path))
+                client.get_collection(COLLECTION_NAME)
+                chroma_collection_ok = True
+            except Exception as exc:  # noqa: BLE001
+                reasons.append(f"无法连接 ChromaDB collection: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        reasons.append(f"无法 import chromadb: {exc}")
+
+    if kb_mode != "vector":
+        reasons.append(f"知识库记录模式为 {kb_mode}，不是 vector")
+
+    retrieval_mode = "vector" if kb_mode == "vector" and can_import_sentence_transformers and can_import_chromadb and chroma_collection_ok else "keyword_fallback"
+    if _VECTOR_UNAVAILABLE_ERROR:
+        retrieval_mode = "keyword_fallback"
+        reasons.append(f"当前进程 vector 已不可用: {_VECTOR_UNAVAILABLE_ERROR}")
+
+    return {
+        "python_executable": sys.executable,
+        "persist_dir": str(persist_path),
+        "kb_mode": kb_mode,
+        "can_import_sentence_transformers": can_import_sentence_transformers,
+        "can_import_chromadb": can_import_chromadb,
+        "chroma_collection_ok": chroma_collection_ok,
+        "retrieval_mode": retrieval_mode,
+        "reasons": reasons,
+    }
+
+
 def normalize_vector_result(result: dict[str, Any]) -> list[list[dict[str, Any]]]:
     """把 ChromaDB query 结果转换为统一结构。"""
     all_rows: list[list[dict[str, Any]]] = []
@@ -303,27 +355,40 @@ def search_docs(
     query: str,
     top_k: int = 5,
     persist_dir: str | Path = "outputs/chroma_db",
+    use_rerank: bool = False,
+    candidate_k: int = 20,
 ) -> list[dict[str, Any]]:
     """检索知识库，返回标准结果列表。"""
-    return batch_search_docs([query], top_k=top_k, persist_dir=persist_dir)[0]
+    return batch_search_docs(
+        [query],
+        top_k=top_k,
+        persist_dir=persist_dir,
+        use_rerank=use_rerank,
+        candidate_k=candidate_k,
+    )[0]
 
 
 def batch_search_docs(
     queries: list[str],
     top_k: int = 5,
     persist_dir: str | Path = "outputs/chroma_db",
+    use_rerank: bool = False,
+    candidate_k: int = 20,
 ) -> list[list[dict[str, Any]]]:
     """批量检索知识库，vector mode 下复用同一个模型和 collection。"""
     global _VECTOR_UNAVAILABLE_ERROR
     persist_path = Path(persist_dir)
+    search_k = max(top_k, candidate_k) if use_rerank else top_k
     mode = load_kb_mode(persist_path)
     if mode == "vector":
         if _VECTOR_UNAVAILABLE_ERROR:
             print(f"当前使用 keyword fallback mode 检索：vector mode 此进程已不可用。原因：{_VECTOR_UNAVAILABLE_ERROR}")
-            return batch_search_keyword(queries, top_k, persist_path)
+            rows = batch_search_keyword(queries, search_k, persist_path)
+            return apply_rerank_if_needed(queries, rows, top_k, use_rerank)
         try:
             print("当前使用 vector mode 检索")
-            return batch_search_vector(queries, top_k, persist_path)
+            rows = batch_search_vector(queries, search_k, persist_path)
+            return apply_rerank_if_needed(queries, rows, top_k, use_rerank)
         except KeyboardInterrupt:
             raise
         except Exception as exc:
@@ -331,4 +396,24 @@ def batch_search_docs(
             print(f"vector mode 加载或检索失败，自动切换 keyword fallback mode。原因：{exc}")
     else:
         print("当前使用 keyword fallback mode 检索")
-    return batch_search_keyword(queries, top_k, persist_path)
+    rows = batch_search_keyword(queries, search_k, persist_path)
+    return apply_rerank_if_needed(queries, rows, top_k, use_rerank)
+
+
+def apply_rerank_if_needed(
+    queries: list[str],
+    rows: list[list[dict[str, Any]]],
+    top_k: int,
+    use_rerank: bool,
+) -> list[list[dict[str, Any]]]:
+    """按需执行 rerank；失败时回退原排序。"""
+    if not use_rerank:
+        return [items[:top_k] for items in rows]
+    reranked_rows: list[list[dict[str, Any]]] = []
+    for query, items in zip(queries, rows):
+        try:
+            reranked_rows.append(rerank_results(query, items, top_k=top_k))
+        except Exception as exc:  # noqa: BLE001
+            print(f"rerank 失败，回退原始排序。原因：{exc}")
+            reranked_rows.append(items[:top_k])
+    return reranked_rows
