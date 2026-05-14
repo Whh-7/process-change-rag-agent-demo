@@ -139,6 +139,54 @@ outputs/eval/rag_eval_failed_cases.csv
 - MRR：首次命中的倒数排名。
 - overall_pass：综合通过率。
 
+## 可选启用 LLM
+
+默认情况下不需要配置 LLM。没有 `.env` 或 `LLM_ENABLE=false` 时，Agent Router 会使用规则模板回答。
+
+创建 `.env`：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+启用 DeepSeek OpenAI-compatible API：
+
+```text
+LLM_ENABLE=true
+LLM_PROVIDER=openai_compatible
+LLM_API_KEY=your_real_api_key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=1200
+```
+
+关闭 LLM：
+
+```text
+LLM_ENABLE=false
+```
+
+检查当前是否使用 LLM：
+
+- 命令行 `scripts/run_agent.py` 会打印 `llm_used` 和 `fallback_reason`。
+- Streamlit 页面顶部和“系统状态”Tab 会显示 LLM 配置状态，但不会显示 API key。
+- Agent 问答 Tab 会展示 `llm_used` 和 `fallback_reason`。
+
+常见问题：
+
+- `llm_used=false`：通常表示 `LLM_ENABLE=false`、未检测到 API key，或 API 调用失败。
+- API key 未检测到：检查 `.env` 是否存在，`LLM_API_KEY` 是否仍为 `your_api_key_here`。
+- API 调用失败：检查网络、额度、`LLM_BASE_URL` 和 `LLM_MODEL`。
+- base_url 或 model 配错：修改 `.env` 后重启命令行进程或 Streamlit 页面。
+- 如何回退规则模板：把 `LLM_ENABLE=false`，或暂时移除 `.env`。
+
+安全提醒：
+
+- 不要提交 `.env`。
+- 不要在日志、截图或文档中暴露 API key。
+- LLM 只用于回答生成和报告润色，不替代差异分析、证据强弱判断和复核优先级规则。
+
 ## 常见问题
 
 ### 页面提示缺少 change_report.csv

@@ -23,6 +23,12 @@ def print_result(result: dict) -> None:
     print("\ntools_used:")
     tools = result.get("tools_used", [])
     print(", ".join(tools) if tools else "无")
+    print("\nllm_used:")
+    print(result.get("llm_used", False))
+    fallback_reason = result.get("fallback_reason", "")
+    if fallback_reason:
+        print("\nfallback_reason:")
+        print(fallback_reason)
     print("\nanswer:")
     print(result.get("answer", ""))
     print("\nsources:")
