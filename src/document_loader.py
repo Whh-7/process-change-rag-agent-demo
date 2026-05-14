@@ -45,6 +45,17 @@ SOURCE_RULES = {
     "07_process_rule_manual": ("rule_manual", "strong"),
 }
 
+SOURCE_STRENGTH_BY_TYPE = {
+    "old_config": "strong",
+    "target_config": "strong",
+    "appointment_notice": "strong",
+    "meeting_minutes": "strong",
+    "rule_manual": "strong",
+    "department_update": "medium",
+    "chat_message": "weak",
+    "other": "medium",
+}
+
 
 def normalize_text(value: Any) -> str:
     """统一处理空值和首尾空格。"""
@@ -317,6 +328,155 @@ def load_pdf_file(path: Path, chunk_prefix: str) -> list[DocumentChunk]:
     return chunks
 
 
+def read_text_with_fallback(path: Path) -> str:
+    """读取 txt/md 上传文件，UTF-8 失败时尝试常见编码。"""
+    for encoding in ["utf-8", "utf-8-sig", "gb18030", "gbk"]:
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def upload_row_to_text(row: pd.Series, source_type: str, sheet_name: str = "") -> str:
+    """把上传表格行转换为通用结构化文本。"""
+    parts = [f"{column}：{safe_get(row, column)}" for column in row.index if safe_get(row, column)]
+    sheet_part = f"sheet：{sheet_name}；" if sheet_name else ""
+    return f"【上传资料】source_type：{source_type}；{sheet_part}" + "；".join(parts)
+
+
+def load_upload_table_file(path: Path, chunk_prefix: str, manifest_row: dict[str, Any]) -> list[DocumentChunk]:
+    """加载上传 CSV/XLSX；XLSX 支持多 sheet。"""
+    source_type = normalize_text(manifest_row.get("source_type")) or "other"
+    evidence_strength = SOURCE_STRENGTH_BY_TYPE.get(source_type, "medium")
+    frames: list[tuple[str, pd.DataFrame]] = []
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".csv":
+            frames.append(("", pd.read_csv(path, encoding="utf-8-sig", dtype=str, keep_default_na=False)))
+        else:
+            sheets = pd.read_excel(path, sheet_name=None, dtype=str, keep_default_na=False)
+            for sheet_name, df in sheets.items():
+                if not df.empty:
+                    frames.append((str(sheet_name), df))
+    except Exception as exc:
+        print(f"跳过上传表格，读取失败 / Skip upload table failed: {path.name}: {exc}")
+        return []
+
+    chunks: list[DocumentChunk] = []
+    row_no = 0
+    for sheet_name, df in frames:
+        df = normalize_dataframe(df)
+        for _, row in df.iterrows():
+            row_no += 1
+            metadata = table_metadata(row, path, source_type, evidence_strength, row_no)
+            metadata.update(upload_metadata(manifest_row, path))
+            if sheet_name:
+                metadata["sheet_name"] = sheet_name
+            chunks.append(DocumentChunk(f"{chunk_prefix}-{row_no:05d}", upload_row_to_text(row, source_type, sheet_name), metadata))
+    return chunks
+
+
+def upload_metadata(manifest_row: dict[str, Any], path: Path) -> dict[str, Any]:
+    """上传文件通用 metadata。"""
+    return {
+        "source_file": path.name,
+        "source_origin": "upload",
+        "upload_id": normalize_text(manifest_row.get("upload_id")),
+        "original_filename": normalize_text(manifest_row.get("original_filename")),
+        "description": normalize_text(manifest_row.get("description")),
+    }
+
+
+def load_upload_text_file(path: Path, chunk_prefix: str, manifest_row: dict[str, Any]) -> list[DocumentChunk]:
+    """加载上传 md/txt。"""
+    source_type = normalize_text(manifest_row.get("source_type")) or "other"
+    evidence_strength = SOURCE_STRENGTH_BY_TYPE.get(source_type, "medium")
+    try:
+        content = read_text_with_fallback(path)
+    except Exception as exc:
+        print(f"跳过上传文本，读取失败 / Skip upload text failed: {path.name}: {exc}")
+        return []
+    blocks = split_markdown_blocks(content) if path.suffix.lower() == ".md" else split_long_text(content)
+    chunks: list[DocumentChunk] = []
+    for idx, block in enumerate(blocks, 1):
+        metadata = {
+            "source_file": path.name,
+            "source_type": source_type,
+            "evidence_strength": evidence_strength,
+            "section_index": idx,
+        }
+        metadata.update(extract_simple_metadata(block))
+        metadata.update(upload_metadata(manifest_row, path))
+        chunks.append(DocumentChunk(f"{chunk_prefix}-{idx:05d}", block, metadata))
+    return chunks
+
+
+def load_upload_pdf_file(path: Path, chunk_prefix: str, manifest_row: dict[str, Any]) -> list[DocumentChunk]:
+    """加载上传 PDF；仅支持文本型 PDF，不做 OCR。"""
+    source_type = normalize_text(manifest_row.get("source_type")) or "other"
+    evidence_strength = SOURCE_STRENGTH_BY_TYPE.get(source_type, "medium")
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(path))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    except Exception as exc:
+        print(f"跳过上传 PDF，读取失败 / Skip upload PDF failed: {path.name}: {exc}")
+        return []
+    if not text:
+        print(f"上传 PDF 无可提取文字，当前版本暂不支持扫描件 OCR: {path.name}")
+        return []
+    chunks: list[DocumentChunk] = []
+    for idx, block in enumerate(split_long_text(text), 1):
+        metadata = {
+            "source_file": path.name,
+            "source_type": source_type,
+            "evidence_strength": evidence_strength,
+            "section_index": idx,
+        }
+        metadata.update(upload_metadata(manifest_row, path))
+        chunks.append(DocumentChunk(f"{chunk_prefix}-{idx:05d}", block, metadata))
+    return chunks
+
+
+def load_uploaded_documents(upload_dir: str | Path = "uploads", start_index: int = 1) -> tuple[list[DocumentChunk], dict[str, Any]]:
+    """读取 uploads/upload_manifest.csv 中登记的上传文件。"""
+    upload_path = Path(upload_dir)
+    manifest_path = upload_path / "upload_manifest.csv"
+    if not manifest_path.exists():
+        return [], {"uploaded_files": [], "uploaded_file_count": 0, "upload_warnings": []}
+    try:
+        manifest = pd.read_csv(manifest_path, encoding="utf-8-sig", dtype=str, keep_default_na=False).fillna("")
+    except Exception as exc:
+        return [], {"uploaded_files": [], "uploaded_file_count": 0, "upload_warnings": [f"读取上传 manifest 失败: {exc}"]}
+
+    chunks: list[DocumentChunk] = []
+    uploaded_files: list[str] = []
+    warnings: list[str] = []
+    for row_no, row in manifest.iterrows():
+        manifest_row = row.to_dict()
+        saved_filename = normalize_text(manifest_row.get("saved_filename"))
+        path = upload_path / saved_filename
+        if not path.exists():
+            warnings.append(f"上传文件不存在，已跳过: {saved_filename}")
+            continue
+        suffix = path.suffix.lower()
+        prefix = f"UPL{start_index + row_no:03d}"
+        if suffix in {".csv", ".xlsx"}:
+            file_chunks = load_upload_table_file(path, prefix, manifest_row)
+        elif suffix in {".md", ".txt"}:
+            file_chunks = load_upload_text_file(path, prefix, manifest_row)
+        elif suffix == ".pdf":
+            file_chunks = load_upload_pdf_file(path, prefix, manifest_row)
+        else:
+            warnings.append(f"不支持的上传文件类型，已跳过: {saved_filename}")
+            file_chunks = []
+        if file_chunks:
+            uploaded_files.append(saved_filename)
+            chunks.extend(file_chunks)
+    return chunks, {"uploaded_files": uploaded_files, "uploaded_file_count": len(uploaded_files), "upload_warnings": warnings}
+
+
 def select_source_files(data_dir: str | Path) -> tuple[list[Path], list[Path]]:
     """选择要加载的源文件，默认 CSV 优先并跳过同名 XLSX。"""
     data_path = Path(data_dir)
@@ -353,9 +513,14 @@ def load_documents(data_dir: str | Path = "data") -> tuple[list[DocumentChunk], 
         else:
             file_chunks = []
 
+        for chunk in file_chunks:
+            chunk.metadata.setdefault("source_origin", "data")
         if file_chunks:
             loaded_files.append(path.name)
             chunks.extend(file_chunks)
+
+    upload_chunks, upload_stats = load_uploaded_documents(Path(data_dir).parent / "uploads", start_index=len(selected_files) + 1)
+    chunks.extend(upload_chunks)
 
     stats = {
         "loaded_files": loaded_files,
@@ -363,6 +528,7 @@ def load_documents(data_dir: str | Path = "data") -> tuple[list[DocumentChunk], 
         "skipped_duplicate_xlsx": [path.name for path in skipped_xlsx],
         "skipped_duplicate_xlsx_count": len(skipped_xlsx),
         "chunk_count": len(chunks),
+        **upload_stats,
     }
     return chunks, stats
 

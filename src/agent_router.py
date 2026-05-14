@@ -75,6 +75,7 @@ class AgentRouter:
 
     def detect_intent(self, query: str) -> str:
         """根据关键词判断用户意图，规则问答优先于普通检索。"""
+        help_words = ["你能做什么", "你是干什么的", "帮助", "help", "怎么用"]
         if "哪些变化" in query and any(word in query for word in ["重点补证", "常规复核", "冲突", "弱线索"]):
             return "evidence_summary"
         if self.is_rule_question(query):
@@ -85,6 +86,36 @@ class AgentRouter:
         evidence_words = ["依据匹配", "证据", "强依据", "弱线索", "缺少依据", "人工复核", "中等依据", "配置上下文", "重点补证", "常规复核", "存在冲突"]
         diff_words = ["有哪些变化", "差异", "变更清单", "新旧配置对比", "变化数量", "新增任务", "字段变更", "高风险"]
         rag_words = ["规则", "依据", "负责人", "交付文档", "聊天记录", "会议纪要", "任命通知", "能不能", "为什么", "校验", "SOP"]
+        business_search_words = [
+            "阶段",
+            "节点",
+            "复核",
+            "测试",
+            "依据",
+            "会议纪要",
+            "上传",
+            "配置",
+            "任务",
+            "负责人",
+            "交付物",
+            "交付文档",
+            "A样",
+            "B1样",
+            "B2样",
+            "C样",
+            "D样",
+            "SOP",
+            "电控",
+            "电机",
+            "电源",
+            "整机",
+            "热管理",
+            "传动系统",
+            "车载软件",
+        ]
+
+        if query.lower() in {"help"} or any(word in query for word in help_words):
+            return "help"
 
         if any(word in query for word in status_words):
             return "status_check"
@@ -95,6 +126,8 @@ class AgentRouter:
         if any(word in query for word in diff_words):
             return "diff_summary"
         if any(word in query for word in rag_words):
+            return "rag_search"
+        if any(word in query for word in business_search_words):
             return "rag_search"
         return "help"
 
@@ -480,4 +513,6 @@ class AgentRouter:
 - 新增任务节点需要校验哪些字段？
 - 生成一份本次流程配置变更复核建议报告。
 - 电控 A样阶段 软件需求冻结 负责人调整依据是什么？
-- SOP阶段有哪些复核要求？"""
+- SOP阶段有哪些复核要求？
+
+如果你想直接搜索上传资料内容，可以在 RAG 检索测试页输入关键词，也可以在 Agent 问答中用“请检索……”提问。"""

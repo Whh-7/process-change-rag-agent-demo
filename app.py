@@ -11,6 +11,7 @@ import subprocess
 import sys
 import traceback
 import gc
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ if str(SRC_DIR) not in sys.path:
 from agent_router import AgentRouter  # noqa: E402
 from llm_client import get_llm_config  # noqa: E402
 from rag_engine import reset_rag_cache, search_docs  # noqa: E402
+from upload_manager import list_uploaded_files, save_uploaded_file, validate_config_schema  # noqa: E402
 
 
 STATUS_CHECKS = [
@@ -114,6 +116,8 @@ def run_script(script_relative: str) -> subprocess.CompletedProcess[str] | None:
         st.error(f"脚本不存在：`{script_relative}`")
         return None
     try:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         return subprocess.run(
             [sys.executable, str(script_path)],
             cwd=ROOT_DIR,
@@ -121,6 +125,7 @@ def run_script(script_relative: str) -> subprocess.CompletedProcess[str] | None:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
             check=False,
         )
     except Exception as exc:  # noqa: BLE001
@@ -620,6 +625,8 @@ def show_rag_test_tab() -> None:
                 "evidence_strength": item.get("evidence_strength", ""),
                 "rerank_score": item.get("rerank_score", ""),
                 "rerank_reason": item.get("rerank_reason", ""),
+                "source_origin": item.get("metadata", {}).get("source_origin", ""),
+                "original_filename": item.get("metadata", {}).get("original_filename", ""),
                 "text": item.get("text", ""),
             }
             for item in results
@@ -683,6 +690,66 @@ def show_rag_eval_section() -> None:
             st.dataframe(load_csv_safe(rerank_results), use_container_width=True, hide_index=True)
 
 
+def show_upload_tab() -> None:
+    """文件上传入口：上传文件只进入知识库，不替换主配置表。"""
+    st.header("文件上传")
+    st.info("上传文件保存后，需要重新构建知识库，才会进入 RAG 检索。当前版本上传的 old_config / target_config 只会进入知识库，不会自动替换 data/ 中的主配置表参与差异分析。")
+    st.caption("重建完成后，可以到“RAG 检索测试”页输入上传文件中的关键词进行验证；如果在 Agent 问答中测试，建议使用“请检索 xxx 的相关依据”这类问法。")
+    uploaded_file = st.file_uploader("上传补充资料", type=["csv", "xlsx", "md", "txt", "pdf"], key="upload_tab_file")
+    source_type = st.selectbox(
+        "source_type",
+        ["department_update", "appointment_notice", "meeting_minutes", "chat_message", "rule_manual", "old_config", "target_config", "other"],
+        key="upload_tab_source_type",
+    )
+    description = st.text_input("文件说明", key="upload_tab_description")
+    if st.button("保存上传文件", key="upload_tab_save", type="primary"):
+        if uploaded_file is None:
+            st.warning("请先选择文件。")
+        else:
+            try:
+                result = save_uploaded_file(uploaded_file, source_type, description)
+                st.success("上传文件已保存。")
+                st.json({key: result[key] for key in ["upload_id", "saved_filename", "source_type", "saved_path"] if key in result})
+                if source_type in {"old_config", "target_config"}:
+                    validation = validate_config_schema(result["saved_path"])
+                    if validation["is_valid"]:
+                        st.success(validation["message"])
+                    else:
+                        st.warning(validation["message"])
+                    st.write("缺少必须字段：", validation["missing_required"] or "无")
+                    st.write("缺少推荐字段：", validation["missing_recommended"] or "无")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"保存上传文件失败：{exc}")
+                with st.expander("查看错误详情"):
+                    st.code(traceback.format_exc())
+
+    st.subheader("上传记录")
+    rows = list_uploaded_files()
+    if rows:
+        show_columns = ["original_filename", "source_type", "upload_time", "description", "saved_filename"]
+        df = pd.DataFrame(rows)
+        st.dataframe(df[[column for column in show_columns if column in df.columns]], use_container_width=True, hide_index=True)
+    else:
+        st.info("暂无上传记录。")
+
+    st.subheader("重新构建知识库")
+    st.warning("如果当前页面已经使用过 RAG 检索，Windows 下重建 ChromaDB 可能因为文件占用失败。可关闭页面后在终端运行 `python scripts/build_knowledge_base.py`。")
+    if st.button("重新构建知识库", key="upload_tab_rebuild_kb"):
+        with st.spinner("正在重新构建知识库..."):
+            reset_rag_cache()
+            gc.collect()
+            result = run_script("scripts/build_knowledge_base.py")
+            if is_chroma_permission_error(result):
+                st.error("ChromaDB 可能被当前页面占用，请关闭占用进程后重试，或在终端运行 `python scripts/build_knowledge_base.py`。")
+                with st.expander("查看脚本输出"):
+                    if result and result.stdout:
+                        st.code(result.stdout)
+                    if result and result.stderr:
+                        st.code(result.stderr)
+            else:
+                show_script_result(result)
+
+
 def main() -> None:
     """Streamlit 入口。"""
     st.set_page_config(page_title="流程配置变更 RAG + Agent 助手 Demo", layout="wide")
@@ -691,7 +758,7 @@ def main() -> None:
     with st.expander("LLM 可选生成层状态", expanded=False):
         show_llm_status()
 
-    tabs = st.tabs(["系统状态", "Agent 问答", "变更清单", "证据匹配", "复核建议报告", "RAG 检索测试"])
+    tabs = st.tabs(["系统状态", "Agent 问答", "变更清单", "证据匹配", "复核建议报告", "RAG 检索测试", "文件上传"])
     with tabs[0]:
         render_tab("系统状态", show_status_tab)
     with tabs[1]:
@@ -704,6 +771,8 @@ def main() -> None:
         render_tab("复核建议报告", show_review_report_tab)
     with tabs[5]:
         render_tab("RAG 检索测试", show_rag_test_tab)
+    with tabs[6]:
+        render_tab("文件上传", show_upload_tab)
 
 
 if __name__ == "__main__":
